@@ -1,0 +1,3 @@
+[submodule "repo-correto/repo-correto/devops-python-api"]
+	path = repo-correto/repo-correto/devops-python-api
+	url = https://github.com/Rubensscorado/devops-python-api.git
