@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 app = FastAPI(
     title="API DevOps de Tarefas",
