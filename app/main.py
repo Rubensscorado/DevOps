@@ -1,10 +1,14 @@
+import os
+
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
+
+APP_VERSION = "1.0.0"
 
 app = FastAPI(
     title="API DevOps de Tarefas",
     description="API didática para demonstrar testes, CI e Docker.",
-    version="1.0.0",
+    version=APP_VERSION,
 )
 
 
@@ -37,6 +41,13 @@ def health() -> dict[str, str]:
     """Endpoint usado por pessoas, containers e pipelines para verificar a API."""
 
     return {"status": "ok", "version": app.version}
+
+
+@app.get("/version")
+def version() -> dict[str, str]:
+    """Informa a versão da API e o commit que originou a imagem em execução."""
+
+    return {"version": APP_VERSION, "commit": os.getenv("APP_COMMIT", "local")}
 
 
 @app.get("/tasks", response_model=list[Task])
