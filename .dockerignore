@@ -12,3 +12,9 @@ reports
 tests
 docs
 README.md
+scripts
+desktop.ini
+.env
+.env.*
+*.pem
+*.ppk

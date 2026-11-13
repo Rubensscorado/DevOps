@@ -10,3 +10,9 @@ reports/
 .idea/
 .vscode/
 .DS_Store
+desktop.ini
+Thumbs.db
+.env
+.env.*
+*.pem
+*.ppk
