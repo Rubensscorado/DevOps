@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, tasks
+from app.main import APP_VERSION, app, tasks
 
 client = TestClient(app)
 
@@ -17,7 +17,27 @@ def test_health_returns_version() -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "1.0.0"}
+    assert response.json() == {"status": "ok", "version": APP_VERSION}
+
+
+def test_version_returns_default_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_COMMIT", raising=False)
+
+    response = client.get("/version")
+
+    assert response.status_code == 200
+    assert response.json() == {"version": APP_VERSION, "commit": "local"}
+
+
+def test_version_returns_commit_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_COMMIT", "abc1234")
+
+    response = client.get("/version")
+
+    assert response.status_code == 200
+    assert response.json() == {"version": APP_VERSION, "commit": "abc1234"}
 
 
 def test_list_starts_empty() -> None:
