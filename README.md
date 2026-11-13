@@ -1,194 +1,154 @@
-# API Python para demonstrar DevOps
+# API DevOps de Tarefas: pipeline CI/CD com GitHub Actions, Docker, Amazon ECR e EC2
 
-Repositório didático para apresentar, em uma única aplicação, três ideias que se conectam:
+## 1. Descrição da aplicação e seu objetivo
 
-1. uma API HTTP escrita em Python;
-2. integração contínua com GitHub Actions;
-3. execução reproduzível com Docker.
+API REST em Python (FastAPI) para gerenciar uma lista de tarefas em memória. O objetivo do projeto é demonstrar uma esteira completa de integração e entrega contínua: qualquer alteração aprovada e incorporada à branch `main` é testada, empacotada em uma imagem Docker, publicada no Amazon ECR e implantada automaticamente em uma instância Amazon EC2.
 
-O projeto utiliza FastAPI, pytest, Ruff, GitHub Actions e Docker. Os dados ficam em memória para manter a atenção da aula no fluxo DevOps, sem introduzir banco de dados.
+Endpoints principais:
 
-## O que os estudantes devem observar
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/` | Mensagem de boas-vindas |
+| GET | `/health` | Verificação de saúde da API |
+| GET | `/version` | Versão da aplicação e commit que gerou a imagem em execução |
+| GET | `/tasks` | Lista as tarefas |
+| POST | `/tasks` | Cria uma tarefa |
+| PATCH | `/tasks/{id}/done` | Marca uma tarefa como concluída |
 
-- O código funciona localmente e no runner do GitHub.
-- A mesma suíte de testes é executada pelo desenvolvedor e pelo pipeline.
-- O Dockerfile descreve o ambiente necessário para executar a API.
-- O pipeline só testa o container depois que qualidade e testes foram aprovados.
-- Logs, cobertura e relatórios funcionam como evidências, não apenas como mensagens coloridas.
+## 2. Tecnologias utilizadas
 
-## Estrutura do repositório
+- Python 3.13 e FastAPI (servidor Uvicorn)
+- Pytest e pytest-cov (testes e cobertura mínima de 90%)
+- Ruff (análise estática e formatação)
+- Docker
+- GitHub e GitHub Actions
+- Amazon ECR (registro privado de imagens)
+- Amazon EC2 com Amazon Linux 2023
+- IAM Role (LabInstanceProfile) para a instância ler imagens do ECR
 
-```text
-.
-├── .github/workflows/ci.yml   # pipeline de integração contínua
-├── app/
-│   ├── __init__.py
-│   └── main.py                # API FastAPI
-├── docs/
-│   ├── API.md
-│   ├── DOCKER.md
-│   ├── GITHUB-ACTIONS.md
-│   └── ROTEIRO-AULA.md
-├── tests/test_api.py          # testes automatizados
-├── .dockerignore
-├── .python-version
-├── compose.yaml
-├── Dockerfile
-├── pyproject.toml             # configuração de pytest, cobertura e Ruff
-├── requirements.txt           # dependências de execução
-└── requirements-dev.txt       # dependências de desenvolvimento e CI
-```
-
-## 1. Executar localmente
-
-Pré-requisitos: Git e Python 3.13.
-
-### Linux e macOS
+## 3. Execução local
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+# Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+# Linux/macOS: source .venv/bin/activate
 python -m pip install --requirement requirements-dev.txt
-uvicorn app.main:app --reload
+python -m pytest --cov=app --cov-report=term-missing
+python -m uvicorn app.main:app --reload
 ```
 
-### Windows PowerShell
+A API fica disponível em `http://127.0.0.1:8000` e a documentação interativa em `http://127.0.0.1:8000/docs`.
 
-```powershell
-py -3.13 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --requirement requirements-dev.txt
-uvicorn app.main:app --reload
-```
-
-Acesse:
-
-- API: <http://localhost:8000>
-- documentação Swagger: <http://localhost:8000/docs>
-- verificação de saúde: <http://localhost:8000/health>
-
-## 2. Experimentar a API
+## 4. Construção e execução da imagem Docker
 
 ```bash
-curl http://localhost:8000/health
-
-curl -X POST http://localhost:8000/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Estudar integração contínua"}'
-
-curl http://localhost:8000/tasks
-
-curl -X PATCH http://localhost:8000/tasks/1/done
+docker build --tag devops-python-api:local .
+docker run --detach --name devops-api --publish 8000:8000 devops-python-api:local
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/version
+docker rm --force devops-api
 ```
 
-Endpoints:
+Para simular o commit no endpoint `/version`, adicione `-e APP_COMMIT=abc1234` ao `docker run`. Sem essa variável, o valor padrão é `local`.
 
-| Método | Caminho | Objetivo | Resposta esperada |
-|---|---|---|---|
-| GET | `/` | Apresentar a API | `200` |
-| GET | `/health` | Informar saúde e versão | `200` |
-| GET | `/tasks` | Listar tarefas | `200` |
-| POST | `/tasks` | Criar uma tarefa | `201` |
-| PATCH | `/tasks/{id}/done` | Concluir uma tarefa | `200` ou `404` |
+## 5. Pipeline de integração contínua (CI)
 
-Veja a explicação do código em [docs/API.md](docs/API.md).
+Arquivo: `.github/workflows/ci.yml`.
 
-## 3. Executar as verificações locais
+- **Gatilho:** `pull_request` para a `main` (opened, synchronize, reopened) e `workflow_dispatch`.
+- **Job `Qualidade e testes`:** baixa o código, configura o Python, instala as dependências, executa `ruff check`, `ruff format --check` e `pytest` com cobertura mínima de 90%.
+- **Job `Build e teste do container`:** depende do job anterior (`needs`), constrói a imagem Docker, sobe o contêiner e valida o endpoint `/health`.
+- Se os testes falharem, o segundo job não é executado e o Pull Request não pode ser mesclado, porque os dois checks são exigidos pela regra de proteção da `main`.
+
+## 6. Pipeline de entrega contínua (CD)
+
+Arquivo: `.github/workflows/deploy.yml`, disparado em `push` na `main` (merge de Pull Request) e em `workflow_dispatch`.
+
+1. **Job `Testes`:** ruff e pytest.
+2. **Job `Build, publicacao no ECR e deploy na EC2`** (`needs: tests`, portanto não roda se os testes falharem):
+   - configura as credenciais da AWS (`aws-actions/configure-aws-credentials`);
+   - faz login no Amazon ECR (`aws-actions/amazon-ecr-login`);
+   - constrói a imagem e a publica no ECR com a tag igual ao SHA do commit;
+   - abre uma conexão SSH com a EC2 e executa o script `scripts/deploy.sh`;
+   - testa a API pelo IP público e confere se `/version` devolve o SHA do commit.
+
+O script `scripts/deploy.sh` roda na EC2 e: autentica o Docker no ECR usando a IAM Role da instância, baixa a imagem do commit, remove o contêiner anterior, inicia o novo (`--restart unless-stopped`, porta 80 para 8000, variável `APP_COMMIT`) e verifica o `/health` em loop.
+
+Nenhum comando é executado manualmente na instância durante o deploy.
+
+### Segredos do GitHub (somente os nomes)
+
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`. Nenhuma credencial é versionada no repositório.
+
+## 7. Arquitetura de implantação
+
+```
+Desenvolvedor
+    |  branch + Pull Request
+    v
+GitHub  --(pull_request)--> CI: ruff + pytest + build/teste do contêiner
+    |
+    |  merge na main (push)
+    v
+GitHub Actions (deploy.yml)
+    |-- Testes
+    |-- docker build  (tag = SHA do commit)
+    |-- docker push -----------------> Amazon ECR (repositório privado: devops-python-api)
+    |-- SSH + scripts/deploy.sh ------> EC2 (Amazon Linux 2023, Docker)
+                                          |-- login no ECR via IAM Role (LabInstanceProfile)
+                                          |-- docker pull da imagem do commit
+                                          |-- docker run -p 80:8000 -e APP_COMMIT=<sha>
+                                          v
+                                   API publicada na porta 80
+```
+
+Rede: Security Group `devops-api-sg` com entrada TCP 22 (SSH, usado pelo GitHub Actions) e TCP 80 (HTTP da API). Região: us-east-1.
+
+## 8. Endereço de acesso à API publicada
+
+`http://18.207.122.44`
+
+Observação: o ambiente é o AWS Academy Learner Lab. O IP público da instância muda quando o laboratório é reiniciado, e os recursos são desligados ao final da avaliação. O endereço acima corresponde à execução registrada nas evidências.
+
+## 9. Evidências da execução das pipelines
+
+| # | Evidência | Arquivo |
+|---|---|---|
+| 01 | CI aprovada no Pull Request #1 | `docs/evidencias/01-ci-aprovada-pr.png` |
+| 02 | Imagens no ECR com a tag do commit | `docs/evidencias/02-ecr-imagens.png` |
+| 03 | Deploy executado com sucesso | `docs/evidencias/03-deploy-sucesso.png` |
+| 04 | Contêiner em execução na EC2 (`docker ps` e `curl /version`) | `docs/evidencias/04-ec2-docker-ps-curl.png` |
+| 05 | API publicada na versão 1.0.0 | `docs/evidencias/05-version-1-0-0.png` |
+| 06 | API publicada na versão 1.1.0 | `docs/evidencias/06-version-1-1-0.png` |
+| 07 | Deploy disparado automaticamente pelo merge (pushed by) | `docs/evidencias/07-deploy-disparado-merge.png` |
+| 08 | Pull Request #2 com checks obrigatórios (proteção da main) | `docs/evidencias/08-pr2-checks-obrigatorios.png` |
+| 09 | Security Group da instância | `docs/evidencias/09-security-group.png` |
+| 10 | Instância EC2 em execução | `docs/evidencias/10-instancia-ec2.png` |
+
+Pull Requests:
+
+- PR #1 (pipeline CI/CD): https://github.com/Rubensscorado/DevOps/pull/1
+- PR #2 (atualização para 1.1.0): https://github.com/Rubensscorado/DevOps/pull/2
+
+### Atualização automática (Etapa 7)
+
+| Versão | Commit exibido em `/version` |
+|---|---|
+| 1.0.0 | `d9fbb40683d96b40b376a651be0aec5978d39972` |
+| 1.1.0 | `3e3255261b977e3b9b10a0b1a8fd2448ae2c4a76` |
+
+O segundo deploy foi disparado pelo merge do Pull Request #2, sem nenhum comando manual na EC2.
+
+## 10. Como verificar a versão implantada
 
 ```bash
-ruff check .
-ruff format --check .
-pytest --cov=app --cov-report=term-missing
+curl http://18.207.122.44/version
 ```
 
-Esses comandos são deliberadamente iguais aos usados no GitHub Actions. Se uma verificação falhar localmente, ela também deverá falhar no pipeline.
+Resposta esperada (exemplo da versão 1.1.0):
 
-Para aplicar a formatação automaticamente:
-
-```bash
-ruff format .
+```json
+{"version":"1.1.0","commit":"3e3255261b977e3b9b10a0b1a8fd2448ae2c4a76"}
 ```
 
-## 4. Publicar no GitHub e acionar a CI
-
-O diretório já é inicializado como repositório Git local. Crie um repositório vazio no GitHub e execute:
-
-```bash
-git remote add origin https://github.com/SEU-USUARIO/devops-python-api.git
-git push -u origin main
-```
-
-O arquivo `.github/workflows/ci.yml` dispara o pipeline em três situações:
-
-- `push` na branch `main`;
-- `pull_request` destinado à `main`;
-- execução manual pela aba **Actions**.
-
-Na aba **Actions**, abra a execução e faça a leitura nesta ordem:
-
-1. workflow;
-2. job;
-3. primeiro step que falhou;
-4. comando e mensagem que explicam a falha.
-
-A explicação detalhada do YAML está em [docs/GITHUB-ACTIONS.md](docs/GITHUB-ACTIONS.md).
-
-## 5. Executar com Docker
-
-```bash
-docker build -t devops-python-api:v1 .
-docker run --rm -p 8000:8000 --name devops-python-api devops-python-api:v1
-```
-
-Em outro terminal:
-
-```bash
-curl http://localhost:8000/health
-docker ps
-docker logs devops-python-api
-```
-
-Com Docker Compose:
-
-```bash
-docker compose up --build
-docker compose down
-```
-
-Veja a leitura detalhada do Dockerfile em [docs/DOCKER.md](docs/DOCKER.md).
-
-## Falhas intencionais para demonstrar
-
-### Falha de teste
-
-Em `app/main.py`, altere temporariamente a versão do health check para `2.0.0`. O teste espera `1.0.0`, então o pytest e o pipeline devem falhar.
-
-### Falha de qualidade
-
-Adicione um import não utilizado no início de `app/main.py`:
-
-```python
-import os
-```
-
-O step `ruff check .` localizará o problema.
-
-### Falha de rede no container
-
-No `Dockerfile`, troque `--host 0.0.0.0` por `--host 127.0.0.1`. O processo iniciará, mas o serviço não ficará acessível pela porta publicada no host.
-
-## Próximos desafios
-
-- Adicionar um endpoint `DELETE /tasks/{id}` e seus testes.
-- Executar os testes em uma matriz com Python 3.12, 3.13 e 3.14.
-- Publicar a imagem em um registry somente após a aprovação dos testes.
-- Substituir o armazenamento em memória por um banco de dados.
-
-## Referências oficiais
-
-- [GitHub Actions: criar e testar Python](https://docs.github.com/pt/actions/tutorials/build-and-test-code/building-and-testing-python)
-- [actions/checkout](https://github.com/actions/checkout)
-- [actions/setup-python](https://github.com/actions/setup-python)
-- [actions/upload-artifact](https://github.com/actions/upload-artifact)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Docker para Python](https://docs.docker.com/language/python/)
+O campo `commit` é o SHA do commit que gerou a imagem em execução. Ele deve coincidir com o commit exibido na execução do workflow **Deploy API** e com a tag da imagem no Amazon ECR.
